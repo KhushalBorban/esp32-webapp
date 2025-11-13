@@ -39,12 +39,28 @@
     const controlsDiv = document.getElementById('controls');
 
     connectBtn.addEventListener('click', async () => {
-      try {
-        device = await navigator.bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
-        });
-        const server = device.gatt.connected ? device.gatt : await device.gatt.connect();
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'ESP32_BT' }], // must match your ESP32 name
+      optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+    });
+
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+    characteristic = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+
+    await characteristic.startNotifications();
+    characteristic.addEventListener('characteristicvaluechanged', handleData);
+
+    connectBtn.style.display = 'none';
+    controlsDiv.style.display = 'block';
+    alert('✅ Connected to ESP32!');
+  } catch (error) {
+    alert('Connection failed: ' + error);
+    console.error(error);
+  }
+});
+
         const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
         characteristic = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
         await characteristic.startNotifications();
@@ -93,4 +109,5 @@
   </script>
 </body>
 </html>
+
 
