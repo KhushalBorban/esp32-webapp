@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ESP32 BLE Data Logger</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial; text-align: center; margin: 40px; }
+    button { margin: 10px; padding: 10px 20px; font-size: 16px; }
+    #controls { display: none; } /* hide until connected */
+  </style>
+</head>
+<body>
+  <h2>ESP32 Bluetooth Data Logger</h2>
+  <button id="connectBtn">🔗 Connect to ESP32</button>
+
+  <div id="controls">
+    <button id="startBtn">▶ Start Data</button>
+    <button id="stopBtn">⏸ Stop Data</button>
+    <button id="ledOnBtn">💡 LED ON</button>
+    <button id="ledOffBtn">💤 LED OFF</button>
+    <button id="downloadBtn">⬇ Download CSV</button>
+  </div>
+
+  <canvas id="dataChart" width="600" height="300"></canvas>
+
+  <script>
+    let device, characteristic;
+    let isReceiving = false;
+    let dataArray = [];
+    const chartCtx = document.getElementById('dataChart').getContext('2d');
+    const chart = new Chart(chartCtx, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label: 'Sensor Value', data: [], borderWidth: 1 }] },
+      options: { scales: { y: { beginAtZero: true } } }
+    });
+
+    const connectBtn = document.getElementById('connectBtn');
+    const controlsDiv = document.getElementById('controls');
+
+    connectBtn.addEventListener('click', async () => {
+      try {
+        device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+        characteristic = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+        await characteristic.startNotifications();
+        characteristic.addEventListener('characteristicvaluechanged', handleData);
+
+        connectBtn.style.display = 'none';
+        controlsDiv.style.display = 'block'; // ✅ show controls after connection
+        alert('Connected to ESP32!');
+      } catch (error) {
+        alert('Connection failed: ' + error);
+      }
+    });
+
+    function handleData(event) {
+      const value = new TextDecoder().decode(event.target.value);
+      const num = parseInt(value);
+      if (!isNaN(num)) {
+        const t = new Date().toLocaleTimeString();
+        dataArray.push({ time: t, value: num });
+        chart.data.labels.push(t);
+        chart.data.datasets[0].data.push(num);
+        chart.update();
+      }
+    }
+
+    async function sendCommand(cmd) {
+      if (!characteristic) return;
+      const enc = new TextEncoder();
+      await characteristic.writeValue(enc.encode(cmd));
+    }
+
+    document.getElementById('startBtn').onclick = () => { sendCommand('START'); isReceiving = true; };
+    document.getElementById('stopBtn').onclick  = () => { sendCommand('STOP'); isReceiving = false; };
+    document.getElementById('ledOnBtn').onclick = () => sendCommand('LED_ON');
+    document.getElementById('ledOffBtn').onclick = () => sendCommand('LED_OFF');
+
+    document.getElementById('downloadBtn').onclick = () => {
+      let csv = "Time,Value\n";
+      dataArray.forEach(row => csv += `${row.time},${row.value}\n`);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'data_log.csv';
+      link.click();
+    };
+  </script>
+</body>
+</html>
