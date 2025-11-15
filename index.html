@@ -1,113 +1,133 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>ESP32 BLE Data Logger</title>
+  <meta charset="UTF-8">
+  <title>ESP32 Real-Time Graph + LED Control</title>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <style>
-    body { font-family: Arial; text-align: center; margin: 40px; }
-    button { margin: 10px; padding: 10px 20px; font-size: 16px; }
-    #controls { display: none; } /* hide until connected */
+    body {
+      font-family: Arial;
+      padding: 20px;
+    }
+    #btns {
+      margin-bottom: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      margin-right: 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 10px;
+      font-weight: bold;
+      color: green;
+    }
   </style>
 </head>
+
 <body>
-  <h2>ESP32 Bluetooth Data Logger</h2>
-  <button id="connectBtn">🔗 Connect to ESP32</button>
 
-  <div id="controls">
-    <button id="startBtn">▶ Start Data</button>
-    <button id="stopBtn">⏸ Stop Data</button>
-    <button id="ledOnBtn">💡 LED ON</button>
-    <button id="ledOffBtn">💤 LED OFF</button>
-    <button id="downloadBtn">⬇ Download CSV</button>
-  </div>
+<h2>ESP32 Real-Time Plot + LED Control</h2>
 
-  <canvas id="dataChart" width="600" height="300"></canvas>
+<div id="btns">
+  <button onclick="ledOn()">LED ON</button>
+  <button onclick="ledOff()">LED OFF</button>
+</div>
 
-  <script>
-    let device, characteristic;
-    let isReceiving = false;
-    let dataArray = [];
-    const chartCtx = document.getElementById('dataChart').getContext('2d');
-    const chart = new Chart(chartCtx, {
-      type: 'line',
-      data: { labels: [], datasets: [{ label: 'Sensor Value', data: [], borderWidth: 1 }] },
-      options: { scales: { y: { beginAtZero: true } } }
-    });
+<p id="status">Connecting...</p>
 
-    const connectBtn = document.getElementById('connectBtn');
-    const controlsDiv = document.getElementById('controls');
+<canvas id="chart" height="200"></canvas>
 
-    connectBtn.addEventListener('click', async () => {
-  try {
-    device = await navigator.bluetooth.requestDevice({
-      filters: [{ name: 'ESP32_BT' }], // must match your ESP32 name
-      optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
-    });
+<script>
+  // ----------------------------------------------------
+  // 1. CONNECT TO ESP32 WEBSOCKET
+  // ----------------------------------------------------
+  const ws = new WebSocket("ws://ESP_IP_HERE:81/");
 
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
-    characteristic = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+  ws.onopen = () => {
+    document.getElementById("status").innerHTML = "Connected";
+  };
 
-    await characteristic.startNotifications();
-    characteristic.addEventListener('characteristicvaluechanged', handleData);
+  ws.onclose = () => {
+    document.getElementById("status").innerHTML = "Disconnected";
+  };
 
-    connectBtn.style.display = 'none';
-    controlsDiv.style.display = 'block';
-    alert('✅ Connected to ESP32!');
-  } catch (error) {
-    alert('Connection failed: ' + error);
-    console.error(error);
+  // ----------------------------------------------------
+  // 2. CHART INITIALIZATION
+  // ----------------------------------------------------
+  const ctx = document.getElementById('chart').getContext('2d');
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [], 
+      datasets: [
+        {
+          label: "Voltage (V)",
+          data: [],
+          borderWidth: 2
+        },
+        {
+          label: "Current (A)",
+          data: [],
+          borderWidth: 2
+        }
+      ]
+    },
+    options: {
+      animation: false,
+      scales: {
+        x: { display: false }
+      }
+    }
+  });
+
+  // ----------------------------------------------------
+  // 3. RECEIVE STREAMED DATA FROM ESP32
+  // ----------------------------------------------------
+  ws.onmessage = (event) => {
+    let text = event.data;
+
+    // Expected format: time,voltage,current
+    let parts = text.split(",");
+    if (parts.length !== 3) return;
+
+    let t = parts[0];
+    let v = parseFloat(parts[1]);
+    let c = parseFloat(parts[2]);
+
+    chart.data.labels.push(t);
+    chart.data.datasets[0].data.push(v);
+    chart.data.datasets[1].data.push(c);
+
+    // Keep last 500 points
+    if (chart.data.labels.length > 500) {
+      chart.data.labels.shift();
+      chart.data.datasets[0].data.shift();
+      chart.data.datasets[1].data.shift();
+    }
+
+    chart.update();
+  };
+
+  // ----------------------------------------------------
+  // 4. BUTTON COMMANDS
+  // ----------------------------------------------------
+  function ledOn() {
+    ws.send("LED_ON");
   }
-});
 
-        const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
-        characteristic = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
-        await characteristic.startNotifications();
-        characteristic.addEventListener('characteristicvaluechanged', handleData);
+  function ledOff() {
+    ws.send("LED_OFF");
+  }
+</script>
 
-        connectBtn.style.display = 'none';
-        controlsDiv.style.display = 'block'; // ✅ show controls after connection
-        alert('Connected to ESP32!');
-      } catch (error) {
-        alert('Connection failed: ' + error);
-      }
-    });
-
-    function handleData(event) {
-      const value = new TextDecoder().decode(event.target.value);
-      const num = parseInt(value);
-      if (!isNaN(num)) {
-        const t = new Date().toLocaleTimeString();
-        dataArray.push({ time: t, value: num });
-        chart.data.labels.push(t);
-        chart.data.datasets[0].data.push(num);
-        chart.update();
-      }
-    }
-
-    async function sendCommand(cmd) {
-      if (!characteristic) return;
-      const enc = new TextEncoder();
-      await characteristic.writeValue(enc.encode(cmd));
-    }
-
-    document.getElementById('startBtn').onclick = () => { sendCommand('START'); isReceiving = true; };
-    document.getElementById('stopBtn').onclick  = () => { sendCommand('STOP'); isReceiving = false; };
-    document.getElementById('ledOnBtn').onclick = () => sendCommand('LED_ON');
-    document.getElementById('ledOffBtn').onclick = () => sendCommand('LED_OFF');
-
-    document.getElementById('downloadBtn').onclick = () => {
-      let csv = "Time,Value\n";
-      dataArray.forEach(row => csv += `${row.time},${row.value}\n`);
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = 'data_log.csv';
-      link.click();
-    };
-  </script>
 </body>
 </html>
+
+
 
 
